@@ -29,8 +29,7 @@ _agent: Agent | None = None
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global _agent
-    loop = asyncio.get_event_loop()
-    # Load retriever in thread pool to avoid blocking the event loop
+    loop = asyncio.get_running_loop()
     await loop.run_in_executor(None, _retriever.load)
     _agent = Agent(_retriever)
     print("Service ready.")
@@ -62,7 +61,7 @@ async def chat(request: ChatRequest):
     if _agent is None:
         raise HTTPException(status_code=503, detail="Service initializing, retry shortly")
 
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     try:
         response = await asyncio.wait_for(
             loop.run_in_executor(None, _agent.chat, request.messages),

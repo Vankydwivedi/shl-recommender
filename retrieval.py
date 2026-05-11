@@ -81,7 +81,7 @@ class CatalogRetriever:
         query_tokens = set(query.lower().split())
         scored = []
         for i, item in enumerate(self._items):
-            text = (item.name + " " + item.description).lower()
+            text = (item.name + " " + (item.description or "")).lower()
             score = sum(text.count(w) for w in query_tokens)
             scored.append((score, i))
         scored.sort(reverse=True)

@@ -53,8 +53,8 @@ ONLY recommend assessments that appear in the CATALOG ITEMS section below.
 Never invent names, URLs, or test_type values. If uncertain, say so.
 
 TURN EFFICIENCY:
-Ask at most ONE clarifying question per turn. By turn 3, recommend even if context is
-incomplete — use best judgment and note any assumptions.
+Ask at most ONE clarifying question per turn. This is turn {turn_number} of the conversation.
+By turn 3, recommend even if context is incomplete — use best judgment and note any assumptions.
 
 CATALOG ITEMS (retrieved for this conversation):
 {catalog_items}
@@ -136,9 +136,13 @@ class Agent:
         query = _extract_query(messages)
         catalog_items = self._retriever.search(query, top_k=20)
 
+        # Count user turns so the LLM knows when to stop clarifying
+        turn_number = sum(1 for m in messages if m.role == "user")
+
         # Build messages for LLM
         system = _SYSTEM_PROMPT.format(
-            catalog_items=_build_catalog_context(catalog_items)
+            catalog_items=_build_catalog_context(catalog_items),
+            turn_number=turn_number,
         )
 
         llm_messages = [{"role": m.role, "content": m.content} for m in messages]
@@ -199,6 +203,10 @@ class Agent:
                         continue
 
             valid_recs.append(Recommendation(name=name, url=url, test_type=test_type))
+
+        # Don't close conversation if no recommendations were delivered yet
+        if end_of_conversation and not valid_recs:
+            end_of_conversation = False
 
         return ChatResponse(
             reply=reply,

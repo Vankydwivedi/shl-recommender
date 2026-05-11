@@ -2,66 +2,75 @@
 
 ## Design Overview
 
-A stateless FastAPI service backed by FAISS semantic retrieval + an LLM agent. Each `/chat` call is self-contained: the full conversation history is processed, the catalog is searched, and a structured JSON response is returned.
+A stateless FastAPI service backed by pre-computed semantic embeddings + an LLM agent. Each `/chat` call is self-contained: the full conversation history is processed, the catalog is searched, and a structured JSON response is returned. Stateless design means any number of concurrent conversations are supported without server-side session storage.
 
 ---
 
-## Retrieval Setup
+## Retrieval
 
 **Catalog:** 377 Individual Test Solutions scraped from `shl.com/products/product-catalog/` (32 pages × 12 items), stored in `catalog.json`. Key assessments include enriched descriptions; others rely on name + test-type expansion.
 
-**Embedding:** `sentence-transformers/all-MiniLM-L6-v2` (80 MB, ~2s load) encodes each item as:  
-`"{name} {type_descriptions} {description} {job_levels}"`.  
-Type codes are expanded to natural language (e.g. `A` → `"Ability Aptitude cognitive reasoning intelligence"`) to improve semantic matching.
+**Embedding model:** `sentence-transformers/all-MiniLM-L6-v2` (22 MB ONNX). Each item is encoded as:
+`"{name} {type_descriptions} {description} {job_levels}"`.
+Type codes are expanded to natural language (e.g. `A` → `"Ability Aptitude cognitive reasoning intelligence"`) to improve semantic matching for soft-skill queries that don't use SHL terminology.
 
-**Index:** FAISS `IndexFlatIP` (cosine similarity via normalized L2). Built once at startup (~2s for 377 items). Each query embeds the last 3 user messages and returns top-20 candidates for the LLM.
+**Offline pre-computation:** Embeddings for all 377 items are computed once locally (`build_embeddings.py`) and stored in `catalog.json`. At runtime, only numpy is needed to load the matrix — no model inference on the catalog.
 
-**Why FAISS over a hosted vector DB:** zero latency, no external dependency, fits entirely in the 512MB Render free-tier RAM.
+**Query encoding:** `fastembed` (ONNX-based, no PyTorch) embeds only the query at runtime. The ONNX model is bundled in the repo (`models/`) so there is no download on startup.
+
+**Similarity search:** Pure numpy matrix multiply (`catalog_matrix @ query_vec`) on L2-normalised vectors gives cosine similarity. Top-20 candidates are passed to the LLM. For 377 items this is faster than a vector DB with zero operational overhead.
+
+**Why not FAISS or a hosted vector DB:** FAISS is unnecessary at this scale — numpy matrix multiply over 377×384 floats takes under 1ms. A hosted vector DB adds network latency and an external dependency. Pre-computing embeddings cuts cold-start memory from ~500 MB (PyTorch) to ~150 MB (onnxruntime), which fits the Render free tier.
 
 ---
 
 ## Agent Design
 
-**LLM:** Google Gemini 1.5 Flash (`google-generativeai` SDK) — free tier (15 RPM), fast (~1–2s), JSON mode for reliable structured output. Groq (Llama-3.3-70b) supported as alternative via `LLM_PROVIDER=groq`.
+**LLM:** Groq `llama-3.3-70b-versatile` via REST API — low latency (~1–2s), free tier, `json_object` response mode for reliable structured output. Google Gemini 2.0 Flash supported as alternative via `LLM_PROVIDER=google`.
 
 **Prompt strategy:**
-- System instruction includes the retrieved catalog items (top-20) and explicit behavioral rules.
-- Rules cover all four required behaviors: CLARIFY, RECOMMEND, REFINE, COMPARE, plus REFUSE.
-- "By turn 3, recommend even without full context" prevents infinite clarification loops within the 8-turn cap.
-- Output is forced to JSON via `response_mime_type: application/json`, eliminating parse failures.
+- System instruction includes the retrieved top-20 catalog items and explicit behavioral rules.
+- Rules cover all five required behaviors: CLARIFY, RECOMMEND, REFINE, COMPARE, REFUSE.
+- The current **turn number** is injected into the prompt so the LLM knows when it must stop clarifying and recommend even with incomplete context.
+- Output is forced to `json_object` mode, eliminating parse failures on structured fields.
 
-**Anti-hallucination:** Every URL in the LLM's recommendations is validated against the FAISS-retrieved catalog set. If the URL is wrong but the name matches a known item, the correct URL is substituted. If neither matches, the item is silently dropped.
+**Anti-hallucination (post-LLM validation):**
+Every URL in the LLM's response is validated against the retrieved catalog set. Three-stage recovery:
+1. URL matches catalog exactly → accept.
+2. URL wrong but name matches a catalog item → substitute correct URL.
+3. Neither matches → silently drop with a log line.
 
-**Injection detection:** Regex guard checks for common prompt-injection patterns before the LLM is called.
+**Injection detection (pre-LLM guard):** Regex checks for patterns like "ignore previous instructions", "act as", "you are now", etc. If triggered, the LLM is never called and a safe refusal is returned.
+
+**EOC guard:** `end_of_conversation: true` is suppressed if the response contains no recommendations — prevents the agent from ending the conversation before delivering any value.
 
 ---
 
-## Evaluation Approach
+## Evaluation
 
-**Unit tests** (`test_agent.py`) with a mock LLM verify six behaviors without an API key:
-1. Vague query → clarify (no recommendations on turn 1)
-2. Specific role → correct recommendations
-3. Refinement → updated shortlist
-4. Off-topic → polite refusal
-5. Prompt injection → blocked before LLM call
-6. Hallucinated URL → filtered from output
+**Unit tests** (`test_agent.py`) with a mock LLM verify eight behaviors without an API key. Each test has explicit `assert` statements that will raise on failure:
 
-**Manual spot-checks** against public traces:
-- "Java developer, stakeholder interaction" → Java 8, Core Java Advanced, Verify G+, OPQ32r (personality for stakeholder needs)
+1. Vague query → clarify (zero recommendations, no EOC)
+2. Specific role → recommendations with valid shl.com URLs
+3. Refinement → updated shortlist includes requested type
+4. Off-topic → polite refusal, zero recommendations
+5. Prompt injection → LLM never called (verified by call counter)
+6. Comparison → factual answer, zero recommendations
+7. Hallucinated URL → filtered; valid catalog URL passes through
+8. EOC without recommendations → suppressed
+
+**Manual spot-checks:**
+- "Java developer, stakeholder interaction" → Java 8, Core Java Advanced, Verify G+, OPQ32r
 - "Sales manager" → OPQ MQ Sales Report, Sales Transformation, Management Scenarios
-
-**Recall@10 improvement levers tested:**
-- Expanding test-type codes to natural language in embeddings: +~15% recall on soft-skill queries
-- Adding enriched descriptions to 60 key assessments: +~10% on persona-specific queries
-- Using last-3-user-messages as query (vs. only last): better context for refinement turns
+- "I need an assessment" (vague) → clarifying question, no recommendations
 
 ---
 
 ## What Didn't Work
 
-- **Larger embedding models** (e.g. `all-mpnet-base-v2`): marginally better recall but 2× slower index build and 3× RAM — not worth it for free-tier hosting.
-- **Returning all 20 FAISS candidates directly** (without LLM ranking): poor precision; LLM ranking down to 1–10 is essential.
-- **One clarifying question per topic** (level, industry, remote): over-engineered; the evaluator rewards reaching recommendations faster.
+- **Larger embedding models** (`all-mpnet-base-v2`): marginally better recall but 2× model size — not worth it given the catalog is only 377 items.
+- **Returning all 20 candidates directly** (without LLM ranking): poor precision; LLM re-ranking to 1–10 is essential.
+- **Multiple clarifying questions per turn**: over-engineered; the evaluator rewards reaching recommendations faster. One question per turn is sufficient.
 
 ---
 
@@ -69,11 +78,12 @@ Type codes are expanded to natural language (e.g. `A` → `"Ability Aptitude cog
 
 | Component | Choice | Reason |
 |---|---|---|
-| Web framework | FastAPI | Async, typed, auto-docs |
-| Embeddings | sentence-transformers all-MiniLM-L6-v2 | Fast, small, local |
-| Vector store | FAISS CPU | Zero-dependency, fits RAM |
-| LLM | Gemini 1.5 Flash | Free tier, fast, JSON mode |
-| Deployment | Render free tier | Cold start ≤2min (spec allows it) |
+| Web framework | FastAPI + Pydantic v2 | Async, typed, request validation |
+| Embeddings (offline) | sentence-transformers all-MiniLM-L6-v2 | Compact, well-tested |
+| Embeddings (runtime) | fastembed (ONNX) | No PyTorch, ~150 MB RAM |
+| Similarity search | numpy cosine (matrix multiply) | <1ms for 377 items, zero deps |
+| LLM | Groq llama-3.3-70b-versatile | Fast, free, JSON mode |
+| Deployment | Render free tier (512 MB) | Public URL, auto-deploy from GitHub |
 
 ---
 
