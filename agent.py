@@ -2,8 +2,8 @@
 Conversation agent: orchestrates retrieval + LLM to produce ChatResponse.
 
 Supports two LLM backends (chosen by env var LLM_PROVIDER or auto-detected):
-  - google  (GOOGLE_API_KEY)   → gemini-1.5-flash
   - groq    (GROQ_API_KEY)     → llama-3.3-70b-versatile
+  - google  (GOOGLE_API_KEY)   → gemini-2.0-flash
 """
 
 import json
@@ -164,7 +164,7 @@ class Agent:
                 "Could you please rephrase your question?"
             )
 
-        reply = str(data.get("reply", ""))
+        reply = str(data.get("reply") or "")
         end_of_conversation = bool(data.get("end_of_conversation", False))
 
         # Validate and filter recommendations against actual catalog

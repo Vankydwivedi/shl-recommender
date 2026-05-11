@@ -53,6 +53,8 @@ async def index():
 
 @app.get("/health")
 async def health():
+    if _agent is None:
+        raise HTTPException(status_code=503, detail="Service initializing")
     return {"status": "ok"}
 
 
