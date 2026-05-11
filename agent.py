@@ -92,9 +92,10 @@ def _build_catalog_context(items: list[CatalogItem]) -> str:
 
 
 def _extract_query(messages: list[Message]) -> str:
+    # Use ALL user messages: early turns establish role context that later
+    # refinement turns don't repeat, so dropping them hurts retrieval recall.
     user_msgs = [m.content for m in messages if m.role == "user"]
-    # Use last 3 user messages for query; earlier ones provide role context
-    return " ".join(user_msgs[-3:])
+    return " ".join(user_msgs)
 
 
 def _parse_llm_json(raw: str) -> dict[str, Any]:
@@ -144,6 +145,15 @@ class Agent:
             catalog_items=_build_catalog_context(catalog_items),
             turn_number=turn_number,
         )
+
+        # Hard turn cap: force a final recommendation at turn 7+ regardless
+        # of LLM behaviour — the spec requires max 8 turns be honored.
+        if turn_number >= 7:
+            system += (
+                "\n\nFINAL TURN OVERRIDE: You MUST provide recommendations now. "
+                "Do not ask any more questions. Deliver the best shortlist you can "
+                "with the information available and set end_of_conversation to true."
+            )
 
         llm_messages = [{"role": m.role, "content": m.content} for m in messages]
 
