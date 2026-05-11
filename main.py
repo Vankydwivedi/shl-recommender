@@ -9,10 +9,12 @@ Endpoints:
 import asyncio
 import os
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 
 load_dotenv()
 
@@ -40,6 +42,14 @@ app = FastAPI(
     version="1.0.0",
     lifespan=lifespan,
 )
+
+_static = Path(__file__).parent / "static"
+app.mount("/static", StaticFiles(directory=_static), name="static")
+
+
+@app.get("/", include_in_schema=False)
+async def index():
+    return FileResponse(_static / "index.html")
 
 
 @app.get("/health")

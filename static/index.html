@@ -1,0 +1,353 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>SHL Assessment Recommender</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    background: #f0f4f8;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .container {
+    width: 100%;
+    max-width: 760px;
+    height: 92vh;
+    display: flex;
+    flex-direction: column;
+    background: #fff;
+    border-radius: 16px;
+    box-shadow: 0 4px 32px rgba(0,0,0,0.10);
+    overflow: hidden;
+  }
+
+  header {
+    background: #003087;
+    color: #fff;
+    padding: 18px 24px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  header .logo {
+    font-size: 22px;
+    font-weight: 700;
+    letter-spacing: 1px;
+  }
+  header .subtitle {
+    font-size: 13px;
+    opacity: 0.75;
+  }
+
+  #messages {
+    flex: 1;
+    overflow-y: auto;
+    padding: 24px 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+
+  .msg {
+    max-width: 80%;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .msg.user { align-self: flex-end; align-items: flex-end; }
+  .msg.assistant { align-self: flex-start; align-items: flex-start; }
+
+  .bubble {
+    padding: 12px 16px;
+    border-radius: 18px;
+    font-size: 14.5px;
+    line-height: 1.55;
+    white-space: pre-wrap;
+  }
+  .user .bubble {
+    background: #003087;
+    color: #fff;
+    border-bottom-right-radius: 4px;
+  }
+  .assistant .bubble {
+    background: #f0f4f8;
+    color: #1a1a2e;
+    border-bottom-left-radius: 4px;
+  }
+
+  .recs {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    width: 100%;
+  }
+  .rec-card {
+    background: #fff;
+    border: 1.5px solid #d0dce8;
+    border-radius: 10px;
+    padding: 10px 14px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+  }
+  .rec-card .rec-name {
+    font-size: 13.5px;
+    font-weight: 600;
+    color: #003087;
+  }
+  .rec-card .rec-type {
+    font-size: 11.5px;
+    color: #666;
+    margin-top: 2px;
+  }
+  .rec-card a {
+    font-size: 12px;
+    color: #fff;
+    background: #003087;
+    padding: 5px 12px;
+    border-radius: 6px;
+    text-decoration: none;
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+  .rec-card a:hover { background: #00438a; }
+
+  .recs-label {
+    font-size: 12px;
+    font-weight: 600;
+    color: #666;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 2px;
+  }
+
+  .typing {
+    align-self: flex-start;
+    background: #f0f4f8;
+    border-radius: 18px;
+    border-bottom-left-radius: 4px;
+    padding: 12px 18px;
+    display: flex;
+    gap: 5px;
+    align-items: center;
+  }
+  .typing span {
+    width: 7px; height: 7px;
+    background: #999;
+    border-radius: 50%;
+    animation: bounce 1.2s infinite;
+  }
+  .typing span:nth-child(2) { animation-delay: 0.2s; }
+  .typing span:nth-child(3) { animation-delay: 0.4s; }
+  @keyframes bounce {
+    0%, 60%, 100% { transform: translateY(0); }
+    30% { transform: translateY(-6px); }
+  }
+
+  .input-row {
+    display: flex;
+    gap: 10px;
+    padding: 16px 20px;
+    border-top: 1px solid #e8eef4;
+    background: #fff;
+  }
+  #input {
+    flex: 1;
+    border: 1.5px solid #d0dce8;
+    border-radius: 24px;
+    padding: 11px 18px;
+    font-size: 14.5px;
+    outline: none;
+    resize: none;
+    max-height: 120px;
+    overflow-y: auto;
+    line-height: 1.4;
+  }
+  #input:focus { border-color: #003087; }
+  #send {
+    background: #003087;
+    color: #fff;
+    border: none;
+    border-radius: 50%;
+    width: 46px;
+    height: 46px;
+    cursor: pointer;
+    font-size: 20px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+  #send:hover { background: #00438a; }
+  #send:disabled { background: #aab8c8; cursor: not-allowed; }
+
+  .badge {
+    display: inline-block;
+    background: #e8f0fe;
+    color: #003087;
+    font-size: 11px;
+    font-weight: 700;
+    padding: 2px 7px;
+    border-radius: 4px;
+    margin-right: 4px;
+  }
+</style>
+</head>
+<body>
+<div class="container">
+  <header>
+    <div>
+      <div class="logo">SHL</div>
+    </div>
+    <div>
+      <div style="font-weight:600;font-size:15px;">Assessment Recommender</div>
+      <div class="subtitle">Find the right test for your hiring needs</div>
+    </div>
+  </header>
+
+  <div id="messages">
+    <div class="msg assistant">
+      <div class="bubble">👋 Hi! I'm your SHL Assessment Recommender. Tell me about the role you're hiring for and I'll suggest the best assessments from SHL's catalog.</div>
+    </div>
+  </div>
+
+  <div class="input-row">
+    <textarea id="input" rows="1" placeholder="e.g. I need an assessment for a mid-level Java developer…"></textarea>
+    <button id="send">&#9658;</button>
+  </div>
+</div>
+
+<script>
+  const messagesEl = document.getElementById('messages');
+  const inputEl = document.getElementById('input');
+  const sendBtn = document.getElementById('send');
+
+  // conversation history sent to API
+  const history = [];
+
+  const TYPE_LABELS = {
+    A: 'Ability & Aptitude', B: 'Biodata & Situational Judgement',
+    C: 'Competencies', D: 'Development & 360', E: 'Assessment Exercises',
+    K: 'Knowledge & Skills', P: 'Personality & Behavior', S: 'Simulations'
+  };
+
+  function typeLabel(code) {
+    return code.trim().split(',').map(c => {
+      const k = c.trim();
+      return `<span class="badge">${k}</span>${TYPE_LABELS[k] || k}`;
+    }).join(' &nbsp; ');
+  }
+
+  function addMessage(role, text, recs) {
+    const wrap = document.createElement('div');
+    wrap.className = `msg ${role}`;
+
+    const bubble = document.createElement('div');
+    bubble.className = 'bubble';
+    bubble.textContent = text;
+    wrap.appendChild(bubble);
+
+    if (recs && recs.length > 0) {
+      const label = document.createElement('div');
+      label.className = 'recs-label';
+      label.textContent = `Recommended Assessments (${recs.length})`;
+      wrap.appendChild(label);
+
+      const recsEl = document.createElement('div');
+      recsEl.className = 'recs';
+      recs.forEach(r => {
+        const card = document.createElement('div');
+        card.className = 'rec-card';
+        card.innerHTML = `
+          <div>
+            <div class="rec-name">${r.name}</div>
+            <div class="rec-type">${typeLabel(r.test_type)}</div>
+          </div>
+          <a href="${r.url}" target="_blank" rel="noopener">View →</a>
+        `;
+        recsEl.appendChild(card);
+      });
+      wrap.appendChild(recsEl);
+    }
+
+    messagesEl.appendChild(wrap);
+    messagesEl.scrollTop = messagesEl.scrollHeight;
+  }
+
+  function addTyping() {
+    const el = document.createElement('div');
+    el.className = 'typing';
+    el.id = 'typing';
+    el.innerHTML = '<span></span><span></span><span></span>';
+    messagesEl.appendChild(el);
+    messagesEl.scrollTop = messagesEl.scrollHeight;
+    return el;
+  }
+
+  async function send() {
+    const text = inputEl.value.trim();
+    if (!text) return;
+
+    inputEl.value = '';
+    inputEl.style.height = 'auto';
+    sendBtn.disabled = true;
+
+    history.push({ role: 'user', content: text });
+    addMessage('user', text);
+
+    const typing = addTyping();
+
+    try {
+      const resp = await fetch('/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ messages: history })
+      });
+
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const data = await resp.json();
+
+      typing.remove();
+      history.push({ role: 'assistant', content: data.reply });
+      addMessage('assistant', data.reply, data.recommendations);
+
+      if (data.end_of_conversation) {
+        const fin = document.createElement('div');
+        fin.style.cssText = 'text-align:center;font-size:12px;color:#999;margin-top:4px;';
+        fin.textContent = '— Conversation complete —';
+        messagesEl.appendChild(fin);
+        sendBtn.disabled = true;
+        inputEl.disabled = true;
+        return;
+      }
+    } catch (e) {
+      typing.remove();
+      addMessage('assistant', `Sorry, something went wrong: ${e.message}. Please try again.`);
+    }
+
+    sendBtn.disabled = false;
+    inputEl.focus();
+  }
+
+  sendBtn.addEventListener('click', send);
+  inputEl.addEventListener('keydown', e => {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
+  });
+
+  // Auto-resize textarea
+  inputEl.addEventListener('input', () => {
+    inputEl.style.height = 'auto';
+    inputEl.style.height = Math.min(inputEl.scrollHeight, 120) + 'px';
+  });
+</script>
+</body>
+</html>
